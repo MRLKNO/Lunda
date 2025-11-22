@@ -25,6 +25,7 @@ Lunda is now an official GitHub Action. You can integrate it directly into your 
 
 ### Example Workflow
 
+```YAML
 name: Scan Forgotten Branches
 
 on:
@@ -40,13 +41,13 @@ jobs:
       - uses: your-username/lunda@v1
         with:
           days_threshold: 60 # optional, defaults to 90
+```
 
 ### Inputs
 
 - days_threshold (optional) – Number of days a branch can be inactive before being flagged. Default is 90.
 
 Lunda will scan your repository for branches inactive longer than the threshold and list them in the workflow logs.
-```
 
 ---
 
@@ -61,9 +62,9 @@ Lunda will scan your repository for branches inactive longer than the threshold 
 ---
 
 ## 📄 License
-
+```
 MIT License
-
+```
 ---
 
 With love — and for your repo’s safety — Lunda!
