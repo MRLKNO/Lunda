@@ -21,35 +21,31 @@ Lunda is a lightweight, smart, and friendly GitHub Action tool designed to help 
 
 ## 🛠️ Usage
 
-### GitHub Action Setup
+Lunda is now an official GitHub Action. You can integrate it directly into your repository workflows.
 
-Create a workflow file in your repository:
-```YAML
-    name: Check Forgotten Branches
+### Example Workflow
 
-    on:
-      schedule:
-        - cron: '0 12 * * 1'
-      workflow_dispatch:
+name: Scan Forgotten Branches
 
-    jobs:
-      lunda:
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v3
+on:
+  workflow_dispatch: # Run manually
+  schedule:
+    - cron: '0 12 * * 1' # Every Monday at 12:00
 
-          - name: Setup Node.js
-            uses: actions/setup-node@v3
-            with:
-              node-version: '20'
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: your-username/lunda@v1
+        with:
+          days_threshold: 60 # optional, defaults to 90
 
-          - name: Install dependencies
-            run: npm install @octokit/rest
+### Inputs
 
-          - name: Run Lunda
-            run: node .github/scripts/checkBranches.js
-            env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+- days_threshold (optional) – Number of days a branch can be inactive before being flagged. Default is 90.
+
+Lunda will scan your repository for branches inactive longer than the threshold and list them in the workflow logs.
 ```
 
 ---
