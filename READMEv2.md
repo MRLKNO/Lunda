@@ -50,12 +50,14 @@ Create a workflow file in your repository:
             run: node .github/scripts/checkBranches.js
             env:
               GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
 
 ---
 
 ## ⚙️ Script Configuration
 ``` Javascript
     const DAYS_THRESHOLD = 90; // number of inactivity days
+```
 
 - Adjust DAYS_THRESHOLD to match your repository’s activity  
 - main and master are always ignored  
