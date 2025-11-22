@@ -1,0 +1,25 @@
+name: Lunda – Forgotten Branch Scanner
+
+on:
+  schedule:
+    - cron: '0 12 * * 1' # Every Monday at 12:00
+  workflow_dispatch:
+
+jobs:
+  lunda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Octokit
+        run: npm install @octokit/rest
+
+      - name: Run Lunda
+        run: node .github/scripts/checkBranches.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
