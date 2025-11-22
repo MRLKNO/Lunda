@@ -5,7 +5,7 @@ const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 // GitHub gives repo in "owner/repo" format, not with dot ;)
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 
-const DAYS_THRESHOLD = 90;
+const DAYS_THRESHOLD = parseInt(process.env.INPUT_DAYS_THRESHOLD) || 90;
 
 async function run() {
   console.log("🔍 Lunda is scanning your repository for forgotten branches...\n");
