@@ -1,6 +1,6 @@
 name: "Lunda – Forgotten Branch Scanner"
 description: "Detect and list forgotten branches in your repository"
-author: "Merlin & One very famous neural network"
+author: "Nameless & Two very famous neural network"
 branding:
   color: "blue"
   icon: "eye"
@@ -13,4 +13,4 @@ inputs:
 
 runs:
   using: "node16"
-  main: "dist/checkBranches.js"
+  main: "code/checkBranches.ts"
