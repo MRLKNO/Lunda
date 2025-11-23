@@ -1,3 +1,5 @@
+[![TypeScript](https://badges.frapsoft.com/typescript/code/typescript-125x28.png?v=101)](https://github.com/ellerbrock/typescript-badges/)
+
 # Lunda
 
 With ❤️ from the human and the robot who finally played the symphony
