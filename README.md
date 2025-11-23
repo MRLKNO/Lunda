@@ -1,5 +1,4 @@
-![Static Badge](https://img.shields.io/badge/-JavaScript-brightgreen?style=flat&logo=javascript&logoColor=%23FFFFFF&color=%23FFFF00)
-
+[![TypeScript](https://badges.frapsoft.com/typescript/code/typescript-125x28.png?v=101)](https://github.com/ellerbrock/typescript-badges/)
 
 # Lunda
 

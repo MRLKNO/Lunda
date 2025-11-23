@@ -2,9 +2,14 @@
   "name": "lunda",
   "version": "1.0.0",
   "description": "Forgotten branch scanner for GitHub repositories.",
-  "main": "code/scripts/checkBranches.js",
+  "main": "code/checkBranches.ts",
   "type": "module",
   "dependencies": {
-    "@octokit/rest": "^20.0.0"
+    "@octokit/rest": "^20.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }
