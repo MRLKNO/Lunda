@@ -1,6 +1,3 @@
-![Static Badge](https://img.shields.io/badge/-JavaScript-brightgreen?style=flat&logo=javascript&logoColor=%23FFFFFF&color=%23FFFF00)
-
-
 # Lunda
 
 With ❤️ from the human and the robot who finally played the symphony
