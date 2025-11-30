@@ -17,22 +17,20 @@ const TRACKING_FILE = "lunda-tracking.json";
 
 interface BranchEntry {
   name: string;
-  lastCommitDate: string;      // ISO date string of last commit
-  lastCommitSha: string;       // SHA to detect updates
-  mValue: number;              // Days until this branch becomes stale
-  calculatedAt: string;        // ISO date when we calculated this m-value
+  sha: string;                 // SHA to detect updates
+  daysUntilStale: number;      // threshold - days_since_last_commit
+  calculatedAt: string;        // ISO date when we calculated this
 }
 
 interface TrackingData {
   threshold: number;
-  branches: BranchEntry[];     // Sorted ascending by mValue (soonest-to-stale first)
-  lastFullScan: string;        // ISO date of last full scan
+  lastFullScan: string;
+  branches: BranchEntry[];     // sorted by daysUntilStale ascending (soonest to stale first)
 }
 
-interface ForgottenBranch {
+interface StaleBranch {
   name: string;
-  lastCommitDate: string;
-  days: number;
+  daysSinceLastCommit: number;
 }
 
 async function loadTrackingData(): Promise<TrackingData | null> {
@@ -88,34 +86,32 @@ async function saveTrackingData(data: TrackingData): Promise<void> {
   console.log("💾 Tracking data saved.");
 }
 
-async function getBranchLastCommit(branchName: string): Promise<{ date: string; sha: string } | null> {
+async function getLatestCommit(branchName: string): Promise<{ date: string; sha: string } | null> {
   try {
-    const commitsResponse = await octokit.rest.repos.listCommits({
+    const response = await octokit.rest.repos.listCommits({
       owner,
       repo,
       sha: branchName,
       per_page: 1,
     });
 
-    if (commitsResponse.data.length === 0) {
-      return null;
-    }
+    if (response.data.length === 0) return null;
 
-    const lastCommit = commitsResponse.data[0];
+    const commit = response.data[0];
     return {
-      date: lastCommit.commit.committer?.date as string,
-      sha: lastCommit.sha,
+      date: commit.commit.committer?.date as string,
+      sha: commit.sha,
     };
   } catch {
     return null;
   }
 }
 
-function calculateMValue(lastCommitDate: string, threshold: number): number {
+function calculateDaysUntilStale(lastCommitDate: string): number {
   const now = new Date();
   const commitDate = new Date(lastCommitDate);
-  const daysSinceUpdate = (now.getTime() - commitDate.getTime()) / (1000 * 60 * 60 * 24);
-  return Math.ceil(threshold - daysSinceUpdate);
+  const daysSinceLastCommit = (now.getTime() - commitDate.getTime()) / (1000 * 60 * 60 * 24);
+  return Math.ceil(DAYS_THRESHOLD - daysSinceLastCommit);
 }
 
 function calculateNextCronDate(daysFromNow: number): string {
@@ -207,148 +203,143 @@ async function getAllBranches(): Promise<string[]> {
   return branches;
 }
 
-async function performInitialScan(): Promise<TrackingData> {
-  console.log("🔍 Performing initial full scan of all branches...\n");
+async function fullScan(): Promise<TrackingData> {
+  console.log("🔍 Performing full scan of all branches...\n");
 
   const branchNames = await getAllBranches();
   const now = new Date().toISOString();
-  const entries: BranchEntry[] = [];
+  const branches: BranchEntry[] = [];
 
-  for (const branchName of branchNames) {
-    const commitInfo = await getBranchLastCommit(branchName);
-    if (!commitInfo) {
-      console.log(`⚠️ Branch ${branchName} has no commits. Skipping.`);
+  for (const name of branchNames) {
+    const commit = await getLatestCommit(name);
+    if (!commit) {
+      console.log(`⚠️ Branch ${name} has no commits. Skipping.`);
       continue;
     }
 
-    const mValue = calculateMValue(commitInfo.date, DAYS_THRESHOLD);
-
-    entries.push({
-      name: branchName,
-      lastCommitDate: commitInfo.date,
-      lastCommitSha: commitInfo.sha,
-      mValue,
+    branches.push({
+      name,
+      sha: commit.sha,
+      daysUntilStale: calculateDaysUntilStale(commit.date),
       calculatedAt: now,
     });
   }
 
-  // Sort by mValue ascending (soonest to be stale first)
-  entries.sort((a, b) => a.mValue - b.mValue);
+  // sort by daysUntilStale ascending (soonest to stale first)
+  branches.sort((a, b) => a.daysUntilStale - b.daysUntilStale);
 
-  return {
-    threshold: DAYS_THRESHOLD,
-    branches: entries,
-    lastFullScan: now,
-  };
+  return { threshold: DAYS_THRESHOLD, lastFullScan: now, branches };
 }
 
-async function performOptimizedCheck(tracking: TrackingData): Promise<{
-  staleBranches: ForgottenBranch[];
+async function optimizedCheck(tracking: TrackingData): Promise<{
+  staleBranches: StaleBranch[];
   updatedTracking: TrackingData;
 }> {
   console.log("🔍 Performing optimized check...\n");
 
-  const staleBranches: ForgottenBranch[] = [];
-  const now = new Date();
-  const nowIso = now.toISOString();
+  const staleBranches: StaleBranch[] = [];
+  const now = new Date().toISOString();
+  const { branches } = tracking;
 
-  // First, check for any new branches not in our list
-  const currentBranches = await getAllBranches();
-  const trackedNames = new Set(tracking.branches.map((b) => b.name));
-  const newBranches = currentBranches.filter((name) => !trackedNames.has(name));
-
-  if (newBranches.length > 0) {
-    console.log(`📌 Found ${newBranches.length} new branch(es). Adding to tracking.`);
-    for (const branchName of newBranches) {
-      const commitInfo = await getBranchLastCommit(branchName);
-      if (commitInfo) {
-        tracking.branches.push({
-          name: branchName,
-          lastCommitDate: commitInfo.date,
-          lastCommitSha: commitInfo.sha,
-          mValue: calculateMValue(commitInfo.date, DAYS_THRESHOLD),
-          calculatedAt: nowIso,
-        });
-      }
-    }
-  }
-
-  // Remove deleted branches
-  const currentBranchSet = new Set(currentBranches);
-  tracking.branches = tracking.branches.filter((b) => currentBranchSet.has(b.name));
-
-  // Check the first entry (lowest mValue) - the one that triggered this run
-  if (tracking.branches.length === 0) {
+  if (branches.length === 0) {
     console.log("✨ No branches to track.");
     return { staleBranches: [], updatedTracking: tracking };
   }
 
-  // Sort to ensure correct order after additions
-  tracking.branches.sort((a, b) => a.mValue - b.mValue);
+  // check the first branch (the one we scheduled this run for)
+  const first = branches[0];
+  const commit = await getLatestCommit(first.name);
 
-  const firstEntry = tracking.branches[0];
-  const commitInfo = await getBranchLastCommit(firstEntry.name);
+  if (!commit) {
+    // it was deleted
+    console.log(`🗑️ Branch ${first.name} was deleted. Removing from list.`);
+    branches.shift();
 
-  if (!commitInfo) {
-    // Branch might have been deleted between our check and now
-    tracking.branches.shift();
-  } else if (commitInfo.sha === firstEntry.lastCommitSha) {
-    // Branch was NOT updated - it's now stale!
-    const daysSinceUpdate = (now.getTime() - new Date(commitInfo.date).getTime()) / (1000 * 60 * 60 * 24);
+  } else if (commit.sha === first.sha) {
+    // its SHA is the same as before - it's stale now
+    console.log(`⏰ Branch ${first.name} is now stale.`);
+    staleBranches.push({
+      name: first.name,
+      daysSinceLastCommit: DAYS_THRESHOLD - first.daysUntilStale + Math.abs(first.daysUntilStale),
+    });
+    branches.shift();
 
-    if (daysSinceUpdate >= DAYS_THRESHOLD) {
-      staleBranches.push({
-        name: firstEntry.name,
-        lastCommitDate: commitInfo.date,
-        days: Math.floor(daysSinceUpdate),
-      });
-      // Remove from tracking (it's been reported)
-      tracking.branches.shift();
-    }
   } else {
-    // Branch WAS updated - recalculate and walk backwards
-    console.log(`🔄 Branch ${firstEntry.name} was updated. Walking back through list...`);
+    // it was updated - recalculate and walk forward
+    console.log(`🔄 Branch ${first.name} was updated. Walking forward through list...`);
 
-    // Update this entry
-    firstEntry.lastCommitDate = commitInfo.date;
-    firstEntry.lastCommitSha = commitInfo.sha;
-    firstEntry.mValue = calculateMValue(commitInfo.date, DAYS_THRESHOLD);
-    firstEntry.calculatedAt = nowIso;
+    first.sha = commit.sha;
+    first.daysUntilStale = calculateDaysUntilStale(commit.date);
+    first.calculatedAt = now;
 
-    // Walk backwards from the end of the list
-    // Stop when we find an entry whose SHA hasn't changed
-    let needsResort = true;
-    for (let i = tracking.branches.length - 1; i > 0; i--) {
-      const entry = tracking.branches[i];
-      const currentCommit = await getBranchLastCommit(entry.name);
+    // walk forward through the rest of the list
+    for (let i = 1; i < branches.length; i++) {
+      const entry = branches[i];
+      const entryCommit = await getLatestCommit(entry.name);
 
-      if (!currentCommit) {
-        // Branch deleted
-        tracking.branches.splice(i, 1);
+      if (!entryCommit) {
+        // branch was deleted
+        console.log(`🗑️ Branch ${entry.name} was deleted.`);
+        branches.splice(i, 1);
+        i--;
         continue;
       }
 
-      if (currentCommit.sha === entry.lastCommitSha) {
-        // This entry hasn't changed, so all previous entries (lower indices)
-        // that we haven't checked yet also haven't changed (except for the first one we already updated)
+      if (entryCommit.sha === entry.sha) {
+        // SHA is same as before - stop, everything after this is unchanged too
         console.log(`✓ Branch ${entry.name} unchanged. Stopping walk.`);
-        needsResort = true;
         break;
-      } else {
-        // Update this entry
-        entry.lastCommitDate = currentCommit.date;
-        entry.lastCommitSha = currentCommit.sha;
-        entry.mValue = calculateMValue(currentCommit.date, DAYS_THRESHOLD);
-        entry.calculatedAt = nowIso;
       }
+
+      // recalculate
+      console.log(`🔄 Branch ${entry.name} was also updated.`);
+      entry.sha = entryCommit.sha;
+      entry.daysUntilStale = calculateDaysUntilStale(entryCommit.date);
+      entry.calculatedAt = now;
     }
 
-    if (needsResort) {
-      tracking.branches.sort((a, b) => a.mValue - b.mValue);
-    }
+    // re-sort the list
+    branches.sort((a, b) => a.daysUntilStale - b.daysUntilStale);
   }
 
   return { staleBranches, updatedTracking: tracking };
+}
+
+function needsFullRescan(tracking: TrackingData | null): boolean {
+  // no saved data exists
+  if (!tracking) return true;
+
+  // threshold setting changed
+  if (tracking.threshold !== DAYS_THRESHOLD) return true;
+
+  // it's been threshold days since last full scan
+  const lastScan = new Date(tracking.lastFullScan);
+  const now = new Date();
+  const daysSinceLastScan = (now.getTime() - lastScan.getTime()) / (1000 * 60 * 60 * 24);
+  return daysSinceLastScan >= DAYS_THRESHOLD;
+}
+
+function reportStaleBranches(staleBranches: StaleBranch[]): void {
+  if (staleBranches.length > 0) {
+    console.log("⚠️ Forgotten branches detected:\n");
+    for (const b of staleBranches) {
+      console.log(`🔸 ${b.name} — last commit ${b.daysSinceLastCommit} days ago`);
+    }
+    console.log("");
+  } else {
+    console.log("✨ No forgotten branches found. Your repo is clean!\n");
+  }
+}
+
+async function scheduleNextRun(tracking: TrackingData): Promise<void> {
+  if (tracking.branches.length > 0) {
+    const daysUntilStale = tracking.branches[0].daysUntilStale;
+    const cron = calculateNextCronDate(daysUntilStale);
+    console.log(`\n📅 Next branch will become stale in ${daysUntilStale} day(s).`);
+    await updateWorkflowCron(cron);
+  } else {
+    console.log("\n📅 No branches to track.");
+  }
 }
 
 async function run(): Promise<void> {
@@ -356,60 +347,39 @@ async function run(): Promise<void> {
   console.log(`📊 Threshold: ${DAYS_THRESHOLD} days\n`);
 
   try {
-    // Load existing tracking data
     let tracking = await loadTrackingData();
+    let staleBranches: StaleBranch[] = [];
 
-    let staleBranches: ForgottenBranch[] = [];
-
-    if (!tracking || tracking.threshold !== DAYS_THRESHOLD) {
-      // First run or threshold changed - do a full scan
+    if (needsFullRescan(tracking)) {
+      // log why we're doing a full scan
       if (tracking && tracking.threshold !== DAYS_THRESHOLD) {
         console.log(`⚠️ Threshold changed from ${tracking.threshold} to ${DAYS_THRESHOLD}. Re-scanning.`);
+      } else if (tracking) {
+        console.log(`🔄 ${DAYS_THRESHOLD} days since last full scan. Re-scanning for new branches.`);
       }
-      tracking = await performInitialScan();
 
-      // Check for any already-stale branches
-      const now = new Date();
+      tracking = await fullScan();
+
+      // report any where daysUntilStale <= 0 (already stale)
       staleBranches = tracking.branches
-        .filter((b) => b.mValue <= 0)
+        .filter((b) => b.daysUntilStale <= 0)
         .map((b) => ({
           name: b.name,
-          lastCommitDate: b.lastCommitDate,
-          days: Math.floor((now.getTime() - new Date(b.lastCommitDate).getTime()) / (1000 * 60 * 60 * 24)),
+          daysSinceLastCommit: DAYS_THRESHOLD + Math.abs(b.daysUntilStale),
         }));
 
-      // Remove already-stale branches from tracking (they'll be reported)
-      tracking.branches = tracking.branches.filter((b) => b.mValue > 0);
+      // remove those from list
+      tracking.branches = tracking.branches.filter((b) => b.daysUntilStale > 0);
+
     } else {
-      // Subsequent run - use optimized check
-      const result = await performOptimizedCheck(tracking);
+      const result = await optimizedCheck(tracking!);
       staleBranches = result.staleBranches;
       tracking = result.updatedTracking;
     }
 
-    // Report stale branches
-    if (staleBranches.length > 0) {
-      console.log("⚠️ Forgotten branches detected:\n");
-      staleBranches.forEach((b) =>
-        console.log(`🔸 ${b.name} — last commit ${b.days} days ago (${b.lastCommitDate})`)
-      );
-      console.log("");
-    } else {
-      console.log("✨ No forgotten branches found. Your repo is clean!\n");
-    }
-
-    // Save updated tracking data
+    reportStaleBranches(staleBranches);
     await saveTrackingData(tracking);
-
-    // Schedule next run
-    if (tracking.branches.length > 0) {
-      const nextM = tracking.branches[0].mValue;
-      const nextCron = calculateNextCronDate(nextM);
-      console.log(`\n📅 Next branch will become stale in ${nextM} day(s).`);
-      await updateWorkflowCron(nextCron);
-    } else {
-      console.log("\n📅 No branches to track. Consider running a full scan periodically.");
-    }
+    await scheduleNextRun(tracking);
 
   } catch (err) {
     console.error("❌ Lunda encountered an error:", err);
